@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR AI Dog</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        #ui {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: center;
+            pointer-events: none;
+        }
+        .button {
+            background: rgba(255, 255, 255, 0.7);
+            border: none;
+            border-radius: 30px;
+            padding: 12px 20px;
+            margin: 0 10px;
+            font-weight: bold;
+            pointer-events: auto;
+        }
+        #status {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 80%;
+        }
+        #speech-input {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            padding: 12px;
+            border-radius: 30px;
+            border: none;
+            background: rgba(255, 255, 255, 0.9);
+            display: none;
+            pointer-events: auto;
+        }
+        .thinking {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="status">Looking for surface...</div>
+    <div id="thinking" class="thinking">Dog is thinking...</div>
+    <input type="text" id="speech-input" placeholder="Say something to the dog...">
+    <div id="ui">
+        <button id="start-ar" class="button">Start AR</button>
+        <button id="place-dog" class="button" style="display: none;">Place Dog</button>
+        <button id="talk" class="button" style="display: none;">Talk</button>
+        <button id="pet" class="button" style="display: none;">Pet</button>
+        <button id="throw-ball" class="button" style="display: none;">Throw Ball</button>
+    </div>
+
+    <!-- Import libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r132/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/DRACOLoader.js"></script>
+
+    <script>
+    // Main Application
+    class ARDogApp {
+        constructor() {
+            // Scene setup
+            this.canvas = document.getElementById('canvas');
+            this.scene = new THREE.Scene();
+            this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+            this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
+            this.renderer.setPixelRatio(window.devicePixelRatio);
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+            this.renderer.xr.enabled = true;
+            
+            // AR elements
+            this.hitTestSource = null;
+            this.hitTestSourceRequested = false;
+            this.reticle = new THREE.Mesh(
+                new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial()
+            );
+            this.reticle.matrixAutoUpdate = false;
+            this.reticle.visible = false;
+            this.scene.add(this.reticle);
+            
+            // Dog model and variables
+            this.dog = null;
+            this.dogPlaced = false;
+            this.dogAnimations = {};
+            this.currentAnimation = null;
+            this.mixer = null;
+            this.clock = new THREE.Clock();
+            this.dogState = {
+                mood: "neutral", // neutral, happy, sad, excited, tired
+                lastInteractions: [],
+                energy: 100,
+                memory: {}
+            };
+            
+            // LLM context
+            this.llmContext = {
+                currentPrompt: "",
+                systemPrompt: `You are an AI dog in an augmented reality experience. You behave just like a real friendly dog would. 
+                Your responses should be short actions the dog would take, using only a few words.
+                Never speak in full sentences, just give the dog's actions and maybe a sound (like "woof!" or "whines").
+                For example: "wags tail excitedly", "tilts head curiously", "jumps up and down, barking", "lies down and looks sad".
+                You should never talk like a human - remember you are a dog!`,
+                memory: []
+            };
+            
+            // Physics objects
+            this.ball = null;
+            
+            // UI elements
+            this.statusEl = document.getElementById('status');
+            this.startARButton = document.getElementById('start-ar');
+            this.placeDogButton = document.getElementById('place-dog');
+            this.talkButton = document.getElementById('talk');
+            this.petButton = document.getElementById('pet');
+            this.throwBallButton = document.getElementById('throw-ball');
+            this.speechInput = document.getElementById('speech-input');
+            this.thinkingEl = document.getElementById('thinking');
+            
+            // Initialize
+            this.setupLighting();
+            this.setupEventListeners();
+            this.initARButton();
+        }
+        
+        setupLighting() {
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+            light.position.set(0.5, 1, 0.25);
+            this.scene.add(light);
+        }
+        
+        initARButton() {
+            this.startARButton.addEventListener('click', () => {
+                this.startARSession();
+            });
+        }
+        
+        startARSession() {
+            navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+                if (supported) {
+                    navigator.xr.requestSession('immersive-ar', {
+                        requiredFeatures: ['hit-test'],
+                        optionalFeatures: ['dom-overlay'],
+                        domOverlay: { root: document.body }
+                    }).then(this.onSessionStarted.bind(this));
+                } else {
+                    this.statusEl.textContent = 'AR not supported on this device';
+                }
+            });
+        }
+        
+        onSessionStarted(session) {
+            this.startARButton.style.display = 'none';
+            this.placeDogButton.style.display = 'block';
+            
+            this.renderer.xr.setReferenceSpaceType('local');
+            this.renderer.xr.setSession(session);
+            
+            session.addEventListener('end', this.onSessionEnded.bind(this));
+            
+            this.placeDogButton.addEventListener('click', this.placeDog.bind(this));
+            this.talkButton.addEventListener('click', this.activateSpeechInput.bind(this));
+            this.petButton.addEventListener('click', () => this.interactWithDog('pet'));
+            this.throwBallButton.addEventListener('click', () => this.throwBall());
+            
+            this.speechInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    const text = this.speechInput.value.trim();
+                    if (text) {
+                        this.talkToDog(text);
+                        this.speechInput.value = '';
+                        this.speechInput.style.display = 'none';
+                    }
+                }
+            });
+            
+            this.loadDogModel();
+            
+            this.renderer.setAnimationLoop(this.render.bind(this));
+        }
+        
+        onSessionEnded() {
+            this.startARButton.style.display = 'block';
+            this.placeDogButton.style.display = 'none';
+            this.talkButton.style.display = 'none';
+            this.petButton.style.display = 'none';
+            this.throwBallButton.style.display = 'none';
+            this.renderer.setAnimationLoop(null);
+        }
+        
+        async loadDogModel() {
+            this.statusEl.textContent = 'Loading dog model...';
+            
+            // For this example, we'll simulate loading a dog model
+            // In a real app, you would use GLTFLoader to load a model
+            
+            // Simulate loading delay
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            
+            // Create a simple dog placeholder using primitives
+            const dogGroup = new THREE.Group();
+            
+            // Body
+            const body = new THREE.Mesh(
+                new THREE.CapsuleGeometry(0.2, 0.4, 4, 8),
+                new THREE.MeshStandardMaterial({ color: 0xA0522D })
+            );
+            body.rotation.z = Math.PI / 2;
+            body.position.y = 0.2;
+            dogGroup.add(body);
+            
+            // Head
+            const head = new THREE.Mesh(
+                new THREE.SphereGeometry(0.15, 16, 16),
+                new THREE.MeshStandardMaterial({ color: 0x8B4513 })
+            );
+            head.position.set(0.3, 0.3, 0);
+            dogGroup.add(head);
+            
+            // Ears
+            const earLeft = new THREE.Mesh(
+                new THREE.ConeGeometry(0.06, 0.12, 16),
+                new THREE.MeshStandardMaterial({ color: 0x8B4513 })
+            );
+            earLeft.position.set(0.33, 0.42, 0.07);
+            earLeft.rotation.x = -Math.PI / 4;
+            dogGroup.add(earLeft);
+            
+            const earRight = earLeft.clone();
+            earRight.position.z = -0.07;
+            earRight.rotation.x = Math.PI / 4;
+            dogGroup.add(earRight);
+            
+            // Legs
+            const legGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.2);
+            const legMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+            
+            const legs = [];
+            const legPositions = [
+                [0.1, 0.1, 0.15], // front right
+                [0.1, 0.1, -0.15], // front left
+                [-0.2, 0.1, 0.15], // back right
+                [-0.2, 0.1, -0.15] // back left
+            ];
+            
+            legPositions.forEach(pos => {
+                const leg = new THREE.Mesh(legGeometry, legMaterial);
+                leg.position.set(...pos);
+                dogGroup.add(leg);
+                legs.push(leg);
+            });
+            
+            // Tail
+            const tail = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.02, 0.01, 0.2),
+                new THREE.MeshStandardMaterial({ color: 0x8B4513 })
+            );
+            tail.position.set(-0.3, 0.25, 0);
+            tail.rotation.z = Math.PI / 4;
+            dogGroup.add(tail);
+            
+            // Scale and position
+            dogGroup.scale.set(0.5, 0.5, 0.5);
+            dogGroup.visible = false;
+            
+            this.dog = dogGroup;
+            this.scene.add(this.dog);
+            
+            // Simulate animations
+            this.dogAnimations = {
+                idle: { duration: 2000, onUpdate: (t) => {
+                    const y = 0.05 * Math.sin(t * Math.PI);
+                    body.position.y = 0.2 + y * 0.2;
+                    head.position.y = 0.3 + y * 0.2;
+                }},
+                walking: { duration: 1000, onUpdate: (t) => {
+                    const cycle = t * Math.PI * 2;
+                    legs.forEach((leg, i) => {
+                        leg.position.y = 0.1 + Math.abs(Math.sin(cycle + i * Math.PI/2)) * 0.05;
+                    });
+                    body.position.y = 0.2 + Math.sin(cycle * 2) * 0.02;
+                }},
+                excited: { duration: 800, onUpdate: (t) => {
+                    const cycle = t * Math.PI * 4;
+                    body.position.y = 0.2 + Math.abs(Math.sin(cycle)) * 0.1;
+                    head.position.y = 0.3 + Math.abs(Math.sin(cycle)) * 0.1;
+                    tail.rotation.z = Math.PI / 4 + Math.sin(cycle * 2) * 0.5;
+                }},
+                sleeping: { duration: 3000, onUpdate: (t) => {
+                    const breathing = Math.sin(t * Math.PI) * 0.02;
+                    body.scale.y = 1 + breathing;
+                }}
+            };
+            
+            this.playDogAnimation('idle');
+            this.statusEl.textContent = 'Find a surface to place your dog';
+        }
+        
+        playDogAnimation(name) {
+            this.currentAnimation = {
+                name,
+                startTime: Date.now(),
+                ...this.dogAnimations[name]
+            };
+        }
+        
+        updateDogAnimation() {
+            if (!this.currentAnimation || !this.dog) return;
+            
+            const elapsed = Date.now() - this.currentAnimation.startTime;
+            const t = (elapsed % this.currentAnimation.duration) / this.currentAnimation.duration;
+            
+            this.currentAnimation.onUpdate(t);
+        }
+        
+        placeDog() {
+            if (!this.reticle.visible) {
+                this.statusEl.textContent = 'Can\'t place dog yet - find a surface';
+                return;
+            }
+            
+            if (!this.dogPlaced) {
+                this.dog.position.setFromMatrixPosition(this.reticle.matrix);
+                this.dog.visible = true;
+                this.dogPlaced = true;
+                
+                this.placeDogButton.style.display = 'none';
+                this.talkButton.style.display = 'block';
+                this.petButton.style.display = 'block';
+                this.throwBallButton.style.display = 'block';
+                
+                this.statusEl.textContent = 'Your dog is ready! Interact with it.';
+                
+                // Initial greeting from the dog
+                setTimeout(() => {
+                    this.simulateLLMResponse('A user has just placed you in their room. How do you react?');
+                }, 1000);
+            }
+        }
+        
+        activateSpeechInput() {
+            this.speechInput.style.display = 'block';
+            this.speechInput.focus();
+        }
+        
+        async talkToDog(text) {
+            this.statusEl.textContent = `You: ${text}`;
+            this.playDogAnimation('excited');
+            
+            await this.simulateLLMResponse(`The user says to you: "${text}". How do you respond as a dog?`);
+        }
+        
+        async interactWithDog(action) {
+            if (action === 'pet') {
+                this.statusEl.textContent = 'You pet the dog';
+                await this.simulateLLMResponse('The user is petting you. How do you react?');
+            }
+        }
+        
+        throwBall() {
+            if (!this.ball) {
+                // Create a ball
+                this.ball = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.05, 16, 16),
+                    new THREE.MeshStandardMaterial({ color: 0xff0000 })
+                );
+                this.scene.add(this.ball);
+            }
+            
+            // Position the ball near the dog
+            this.ball.position.copy(this.dog.position);
+            this.ball.position.y += 0.5;
+            this.ball.position.z += 0.5;
+            this.ball.visible = true;
+            
+            // Simulate throwing animation
+            const startPos = this.ball.position.clone();
+            const endPos = this.dog.position.clone();
+            endPos.x += (Math.random() - 0.5) * 2;
+            endPos.z += (Math.random() - 0.5) * 2;
+            
+            const animateBall = () => {
+                const progress = (Date.now() - throwStart) / 1000; // 1 second animation
+                
+                if (progress < 1) {
+                    // Parabolic arc
+                    const t = progress;
+                    this.ball.position.x = startPos.x + (endPos.x - startPos.x) * t;
+                    this.ball.position.z = startPos.z + (endPos.z - startPos.z) * t;
+                    this.ball.position.y = startPos.y + 1 * Math.sin(Math.PI * t); // Arc height
+                    
+                    requestAnimationFrame(animateBall);
+                } else {
+                    this.ball.position.copy(endPos);
+                    this.ball.position.y = 0.05; // On the ground
+                    
+                    // Make the dog react to the ball
+                    this.simulateLLMResponse('The user threw a ball near you. How do you react?');
+                }
+            };
+            
+            const throwStart = Date.now();
+            animateBall();
+            
+            this.statusEl.textContent = 'You threw a ball';
+        }
+        
+        async simulateLLMResponse(prompt) {
+            // In a real app, this would be a call to an LLM API
+            this.thinkingEl.style.display = 'block';
+            
+            // Add to context
+            this.llmContext.currentPrompt = prompt;
+            this.llmContext.memory.push({ role: "user", content: prompt });
+            
+            // Simulate API delay
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            
+            // Simulate responses based on prompt keywords
+            let response = "";
+            if (prompt.includes("placed you in")) {
+                response = "wags tail excitedly, looks around curiously, then sits and tilts head";
+                this.playDogAnimation('excited');
+            } else if (prompt.includes("petting you")) {
+                response = "closes eyes happily, leans into the pets, tail thumps against floor";
+                this.playDogAnimation('idle');
+            } else if (prompt.includes("threw a ball")) {
+                response = "barks excitedly, runs to ball, picks it up and brings it back, tail wagging";
+                this.playDogAnimation('walking');
+            } else if (prompt.includes("says to you")) {
+                // Pick a random response for speech
+                const responses = [
+                    "tilts head curiously, ears perked up",
+                    "wags tail and makes excited whining sound",
+                    "barks once and jumps up slightly",
+                    "sits attentively, looking at you with head tilted"
+                ];
+                response = responses[Math.floor(Math.random() * responses.length)];
+                this.playDogAnimation(Math.random() > 0.5 ? 'excited' : 'idle');
+            }
+            
+            // Add to memory
+            this.llmContext.memory.push({ role: "assistant", content: response });
+            
+            // Limit memory to last 10 interactions
+            if (this.llmContext.memory.length > 10) {
+                this.llmContext.memory = this.llmContext.memory.slice(-10);
+            }
+            
+            this.statusEl.textContent = `Dog: ${response}`;
+            this.thinkingEl.style.display = 'none';
+            
+            return response;
+        }
+        
+        /**
+         * Actual LLM API call function - replace the simulation function with this
+         * when you're ready to connect to a real API
+         */
+        async callLLMAPI(prompt) {
+            try {
+                const response = await fetch('https://your-backend-service.com/api/llm', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        systemPrompt: this.llmContext.systemPrompt,
+                        messages: this.llmContext.memory,
+                        // Add any API specific parameters here
+                        temperature: 0.7,
+                        max_tokens: 50
+                    })
+                });
+                
+                const data = await response.json();
+                
+                // Structure depends on the API you're using
+                return data.choices[0].message.content;
+            } catch (error) {
+                console.error('Error calling LLM API:', error);
+                return "tilts head with confusion";
+            }
+        }
+        
+        setupEventListeners() {
+            window.addEventListener('resize', () => {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+        
+        render(timestamp, frame) {
+            if (frame) {
+                const referenceSpace = this.renderer.xr.getReferenceSpace();
+                const session = this.renderer.xr.getSession();
+                
+                if (this.hitTestSourceRequested === false) {
+                    session.requestReferenceSpace('viewer').then((referenceSpace) => {
+                        session.requestHitTestSource({ space: referenceSpace }).then((source) => {
+                            this.hitTestSource = source;
+                        });
+                    });
+                    
+                    session.addEventListener('end', () => {
+                        this.hitTestSourceRequested = false;
+                        this.hitTestSource = null;
+                    });
+                    
+                    this.hitTestSourceRequested = true;
+                }
+                
+                if (this.hitTestSource) {
+                    const hitTestResults = frame.getHitTestResults(this.hitTestSource);
+                    
+                    if (hitTestResults.length) {
+                        const hit = hitTestResults[0];
+                        
+                        this.reticle.visible = true;
+                        this.reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
+                        
+                        if (this.statusEl.textContent === 'Looking for surface...') {
+                            this.statusEl.textContent = 'Surface found! Click "Place Dog"';
+                        }
+                    } else {
+                        this.reticle.visible = false;
+                    }
+                }
+            }
+            
+            // Update animations
+            this.updateDogAnimation();
+            
+            this.renderer.render(this.scene, this.camera);
+        }
+    }
+    
+    // Initialize the app when the page loads
+    window.addEventListener('DOMContentLoaded', () => {
+        const app = new ARDogApp();
+    });
+    </script>
+</body>
+</html>
