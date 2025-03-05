@@ -27,10 +27,10 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Request logging middleware
+// Request logging middleware with more details
 app.use((req, res, next) => {
   const start = Date.now();
-  logger.info(`${req.method} ${req.url} [START]`);
+  logger.info(`${req.method} ${req.url} [START] Headers: ${JSON.stringify(req.headers)}`);
   
   res.on('finish', () => {
     const duration = Date.now() - start;
@@ -56,9 +56,14 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Debug endpoint for AR capability detection
+// Debug endpoint for AR capability detection - now with CORS explicitly enabled
 app.get('/api/check-ar', (req, res) => {
   logger.info('AR capability check requested');
+  // Set CORS headers explicitly for this endpoint
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  
   res.json({ 
     message: 'AR capability check endpoint reached',
     timestamp: new Date().toISOString(),
@@ -67,8 +72,13 @@ app.get('/api/check-ar', (req, res) => {
   });
 });
 
-// Endpoint to receive client logs
+// Endpoint to receive client logs - now with CORS explicitly enabled
 app.post('/api/log', (req, res) => {
+  // Set CORS headers explicitly for this endpoint
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'POST');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  
   const { message, type, userAgent, timestamp } = req.body;
   logger.info(`Client log [${type}]: ${message} (${userAgent})`);
   res.json({ received: true });
@@ -147,6 +157,12 @@ app.post('/api/llm', async (req, res) => {
   }
 });
 
+// Add a catchall route handler to log 404s
+app.use((req, res) => {
+  logger.error(`404 Not Found: ${req.method} ${req.url}`);
+  res.status(404).json({ error: 'Endpoint not found' });
+});
+
 // Dog behavior context management (optional)
 const dogContexts = new Map();
 
@@ -177,4 +193,6 @@ app.get('/api/dog-context/:id', (req, res) => {
 // Start the server
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
+  logger.info(`Server started on port ${port}`);
+  logger.info(`Access via ngrok: check the ngrok dashboard for your public URL`);
 });
