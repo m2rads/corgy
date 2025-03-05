@@ -568,37 +568,47 @@
         }
         
         async simulateLLMResponse(prompt) {
-            // In a real app, this would be a call to an LLM API
+            // Show thinking indicator
             this.thinkingEl.style.display = 'block';
             
             // Add to context
             this.llmContext.currentPrompt = prompt;
             this.llmContext.memory.push({ role: "user", content: prompt });
             
-            // Simulate API delay
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            
-            // Simulate responses based on prompt keywords
             let response = "";
-            if (prompt.includes("placed you in")) {
-                response = "wags tail excitedly, looks around curiously, then sits and tilts head";
-                this.playDogAnimation('excited');
-            } else if (prompt.includes("petting you")) {
-                response = "closes eyes happily, leans into the pets, tail thumps against floor";
-                this.playDogAnimation('idle');
-            } else if (prompt.includes("threw a ball")) {
-                response = "barks excitedly, runs to ball, picks it up and brings it back, tail wagging";
-                this.playDogAnimation('walking');
-            } else if (prompt.includes("says to you")) {
-                // Pick a random response for speech
-                const responses = [
-                    "tilts head curiously, ears perked up",
-                    "wags tail and makes excited whining sound",
-                    "barks once and jumps up slightly",
-                    "sits attentively, looking at you with head tilted"
-                ];
-                response = responses[Math.floor(Math.random() * responses.length)];
-                this.playDogAnimation(Math.random() > 0.5 ? 'excited' : 'idle');
+            
+            try {
+                // Try to use the real API first
+                response = await this.callLLMAPI(prompt);
+            } catch (error) {
+                console.error('Error using LLM API, falling back to simulation:', error);
+                
+                // Simulate API delay
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Simulate responses based on prompt keywords (fallback)
+                if (prompt.includes("placed you in")) {
+                    response = "wags tail excitedly, looks around curiously, then sits and tilts head";
+                    this.playDogAnimation('excited');
+                } else if (prompt.includes("petting you")) {
+                    response = "closes eyes happily, leans into the pets, tail thumps against floor";
+                    this.playDogAnimation('idle');
+                } else if (prompt.includes("threw a ball")) {
+                    response = "barks excitedly, runs to ball, picks it up and brings it back, tail wagging";
+                    this.playDogAnimation('walking');
+                } else if (prompt.includes("says to you")) {
+                    // Pick a random response for speech
+                    const responses = [
+                        "tilts head curiously, ears perked up",
+                        "wags tail and makes excited whining sound",
+                        "barks once and jumps up slightly",
+                        "sits attentively, looking at you with head tilted"
+                    ];
+                    response = responses[Math.floor(Math.random() * responses.length)];
+                    this.playDogAnimation(Math.random() > 0.5 ? 'excited' : 'idle');
+                } else {
+                    response = "looks at you with head tilted";
+                }
             }
             
             // Add to memory
@@ -621,7 +631,7 @@
          */
         async callLLMAPI(prompt) {
             try {
-                const response = await fetch('https://your-backend-service.com/api/llm', {
+                const response = await fetch('/api/llm', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',

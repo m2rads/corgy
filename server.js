@@ -16,6 +16,14 @@ app.use(express.json());
 // Serve static files from assets directory
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
+// Serve static files from root directory
+app.use(express.static(path.join(__dirname)));
+
+// Serve index.html for the root route
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
 // LLM API endpoints
 app.post('/api/llm', async (req, res) => {
   try {
