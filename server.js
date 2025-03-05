@@ -4,6 +4,20 @@ const cors = require('cors');
 const axios = require('axios');
 const dotenv = require('dotenv');
 const path = require('path');
+const winston = require('winston');
+
+// Configure logger
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.printf(info => `${info.timestamp} ${info.level}: ${info.message}`)
+  ),
+  transports: [
+    new winston.transports.Console(),
+    new winston.transports.File({ filename: 'server.log' })
+  ]
+});
 
 dotenv.config();
 const app = express();
@@ -13,6 +27,23 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Request logging middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  logger.info(`${req.method} ${req.url} [START]`);
+  
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    logger.info(`${req.method} ${req.url} [FINISHED] ${res.statusCode} - ${duration}ms`);
+  });
+  
+  res.on('error', error => {
+    logger.error(`${req.method} ${req.url} [ERROR] ${error.message}`);
+  });
+  
+  next();
+});
+
 // Serve static files from assets directory
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
@@ -21,7 +52,26 @@ app.use(express.static(path.join(__dirname)));
 
 // Serve index.html for the root route
 app.get('/', (req, res) => {
+  logger.info('Serving index.html');
   res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Debug endpoint for AR capability detection
+app.get('/api/check-ar', (req, res) => {
+  logger.info('AR capability check requested');
+  res.json({ 
+    message: 'AR capability check endpoint reached',
+    timestamp: new Date().toISOString(),
+    headers: req.headers,
+    userAgent: req.get('User-Agent')
+  });
+});
+
+// Endpoint to receive client logs
+app.post('/api/log', (req, res) => {
+  const { message, type, userAgent, timestamp } = req.body;
+  logger.info(`Client log [${type}]: ${message} (${userAgent})`);
+  res.json({ received: true });
 });
 
 // LLM API endpoints

@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>AR AI Dog</title>
     <style>
         body {
@@ -33,6 +35,30 @@
             font-weight: bold;
             pointer-events: auto;
         }
+        /* New styles for fallback mode */
+        #fallback-mode {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+        }
+        #fallback-button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            margin-top: 15px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        /* End new styles */
         #status {
             position: absolute;
             top: 20px;
@@ -67,6 +93,32 @@
             border-radius: 10px;
             display: none;
         }
+        /* Debug panel styles */
+        #debug-panel {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.8);
+            color: lime;
+            font-family: monospace;
+            font-size: 10px;
+            max-height: 30%;
+            overflow-y: auto;
+            padding: 10px;
+            display: none;
+        }
+        #debug-toggle {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 1000;
+        }
     </style>
 </head>
 <body>
@@ -81,13 +133,152 @@
         <button id="pet" class="button" style="display: none;">Pet</button>
         <button id="throw-ball" class="button" style="display: none;">Throw Ball</button>
     </div>
+    
+    <!-- Debug Tools -->
+    <button id="debug-toggle">Show Debug</button>
+    <div id="debug-panel"></div>
+
+    <!-- Fallback Mode UI -->
+    <div id="fallback-mode">
+        <h3>AR Not Supported</h3>
+        <p>Your device or browser doesn't support WebXR for AR.</p>
+        <p>You can still view the dog in 3D mode instead.</p>
+        <button id="fallback-button">View in 3D Mode</button>
+    </div>
 
     <!-- Import libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r132/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/GLTFLoader.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/DRACOLoader.js"></script>
+    <!-- Add WebXR polyfills for better iOS support -->
+    <script src="https://unpkg.com/webxr-polyfill@latest/build/webxr-polyfill.js"></script>
 
     <script>
+    // Initialize WebXR polyfill first
+    const polyfill = new WebXRPolyfill({
+        // Specific options for iOS
+        allowCardboardOnDesktop: true,
+        enableLegacyWebVR: true
+    });
+    
+    // Debug logger
+    const logger = {
+        logs: [],
+        maxLogs: 100,
+        
+        log: function(message, type = 'info') {
+            const timestamp = new Date().toISOString().substring(11, 23);
+            const entry = `${timestamp} [${type.toUpperCase()}] ${message}`;
+            this.logs.unshift(entry);
+            
+            // Trim log if needed
+            if (this.logs.length > this.maxLogs) {
+                this.logs.pop();
+            }
+            
+            // Update debug panel if visible
+            this.updatePanel();
+            
+            // Also log to console
+            console.log(entry);
+            
+            // Send to server for logging important events
+            if (type === 'error' || type === 'warn') {
+                this.sendToServer(entry, type);
+            }
+        },
+        
+        info: function(message) {
+            this.log(message, 'info');
+        },
+        
+        warn: function(message) {
+            this.log(message, 'warn');
+        },
+        
+        error: function(message, error) {
+            let errorDetails = message;
+            if (error) {
+                errorDetails += `: ${error.message || error}`;
+                console.error(error);
+            }
+            this.log(errorDetails, 'error');
+        },
+        
+        updatePanel: function() {
+            const panel = document.getElementById('debug-panel');
+            if (panel) {
+                panel.innerHTML = this.logs.join('<br>');
+            }
+        },
+        
+        sendToServer: function(message, type) {
+            try {
+                fetch('/api/log', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message,
+                        type,
+                        userAgent: navigator.userAgent,
+                        timestamp: new Date().toISOString()
+                    })
+                }).catch(e => {
+                    console.error('Failed to send log to server', e);
+                    // Don't worry about server logging failing
+                });
+            } catch (e) {
+                console.error('Error sending log to server', e);
+                // Continue even if server logging fails
+            }
+        },
+        
+        checkXRCapabilities: function() {
+            this.info('Checking XR capabilities...');
+            
+            // Try to check AR capabilities on server but don't rely on response
+            fetch('/api/check-ar')
+                .then(res => res.json())
+                .then(data => {
+                    this.info(`AR check endpoint response: ${JSON.stringify(data.message)}`);
+                })
+                .catch(err => {
+                    this.info('AR check endpoint failed - continuing in offline mode');
+                });
+                
+            // Check navigator.xr
+            if (!navigator.xr) {
+                this.error('WebXR API not available on this browser');
+                return false;
+            } else {
+                this.info('WebXR API is available');
+            }
+            
+            // Return results of basic check
+            return !!navigator.xr;
+        }
+    };
+    
+    // Initialize debug panel
+    document.getElementById('debug-toggle').addEventListener('click', function() {
+        const panel = document.getElementById('debug-panel');
+        if (panel.style.display === 'none' || !panel.style.display) {
+            panel.style.display = 'block';
+            this.textContent = 'Hide Debug';
+        } else {
+            panel.style.display = 'none';
+            this.textContent = 'Show Debug';
+        }
+    });
+
+    // Add fallback mode functionality
+    document.getElementById('fallback-button').addEventListener('click', function() {
+        document.getElementById('fallback-mode').style.display = 'none';
+        startFallback3DMode();
+    });
+
     // Main Application
     class ARDogApp {
         constructor() {
@@ -95,10 +286,22 @@
             this.canvas = document.getElementById('canvas');
             this.scene = new THREE.Scene();
             this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
-            this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
-            this.renderer.setPixelRatio(window.devicePixelRatio);
+            
+            // Renderer with iOS-friendly settings
+            this.renderer = new THREE.WebGLRenderer({ 
+                canvas: this.canvas, 
+                antialias: true, 
+                alpha: true,
+                powerPreference: "high-performance",
+                precision: "highp"
+            });
+            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio for performance
             this.renderer.setSize(window.innerWidth, window.innerHeight);
             this.renderer.xr.enabled = true;
+            
+            // Extra debugging for iOS
+            logger.info(`Using WebGL Renderer: ${this.renderer.getContext().getParameter(this.renderer.getContext().VERSION)}`);
+            logger.info(`Renderer pixel ratio: ${this.renderer.getPixelRatio()}`);
             
             // AR elements
             this.hitTestSource = null;
@@ -163,25 +366,99 @@
         
         initARButton() {
             this.startARButton.addEventListener('click', () => {
+                logger.info('Start AR button clicked');
+                // Add a user gesture handler for iOS - Safari requires user gesture
                 this.startARSession();
             });
         }
         
         startARSession() {
-            navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
-                if (supported) {
-                    navigator.xr.requestSession('immersive-ar', {
-                        requiredFeatures: ['hit-test'],
-                        optionalFeatures: ['dom-overlay'],
-                        domOverlay: { root: document.body }
-                    }).then(this.onSessionStarted.bind(this));
+            logger.info('Starting AR session with WebXR version: ' + (navigator.xr ? 'Available' : 'Not available'));
+            
+            // Make sure this is being called from a user gesture for iOS Safari
+            if (!navigator.xr) {
+                logger.error('WebXR API not available in this browser');
+                
+                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+                if (isIOS) {
+                    logger.info('iOS device detected, attempting WebXR polyfill');
+                    // Force showing the AR button on iOS even if navigator.xr is not detected
+                    // The WebXR polyfill might make it work
+                    this.statusEl.innerHTML = 'Using WebXR polyfill. If this does not work, your device may not support AR.';
+                    
+                    // Try to initialize AR anyway - the polyfill might handle it
+                    this.tryInitializeAR();
                 } else {
-                    this.statusEl.textContent = 'AR not supported on this device';
+                    this.statusEl.innerHTML = 'AR not supported on this device/browser.';
+                    // Show fallback mode
+                    document.getElementById('fallback-mode').style.display = 'block';
                 }
-            });
+                return;
+            }
+            
+            this.tryInitializeAR();
+        }
+        
+        tryInitializeAR() {
+            logger.info('Trying to initialize AR');
+            
+            if (typeof navigator.xr.isSessionSupported !== 'function') {
+                logger.error('isSessionSupported is not a function - polyfill may not be working correctly');
+                this.statusEl.innerHTML = 'WebXR API not fully supported on this browser.';
+                // Show fallback mode
+                document.getElementById('fallback-mode').style.display = 'block';
+                return;
+            }
+            
+            navigator.xr.isSessionSupported('immersive-ar')
+                .then((supported) => {
+                    if (supported) {
+                        logger.info('immersive-ar is supported, requesting session');
+                        
+                        // Use minimal required features for iOS compatibility
+                        const sessionInit = { 
+                            requiredFeatures: ['hit-test'],
+                            optionalFeatures: ['dom-overlay'],
+                        };
+                        
+                        // Add dom-overlay only if supported
+                        if (sessionInit.optionalFeatures.includes('dom-overlay')) {
+                            sessionInit.domOverlay = { root: document.body };
+                        }
+                        
+                        navigator.xr.requestSession('immersive-ar', sessionInit)
+                            .then(session => {
+                                logger.info('AR session created successfully');
+                                this.onSessionStarted(session);
+                            })
+                            .catch(error => {
+                                logger.error('Failed to start AR session', error);
+                                
+                                if (error.message.includes('permission')) {
+                                    this.statusEl.textContent = 'Camera permission denied. Please allow camera access.';
+                                } else {
+                                    this.statusEl.textContent = `AR session failed: ${error.message || error}`;
+                                }
+                                // Show fallback mode
+                                document.getElementById('fallback-mode').style.display = 'block';
+                            });
+                    } else {
+                        logger.error('immersive-ar not supported on this device');
+                        this.statusEl.innerHTML = 'AR not supported on this device. Your device might not have AR capabilities.';
+                        // Show fallback mode
+                        document.getElementById('fallback-mode').style.display = 'block';
+                    }
+                })
+                .catch(error => {
+                    logger.error('Error checking AR support', error);
+                    this.statusEl.textContent = `Error checking AR support: ${error.message || error}`;
+                    // Show fallback mode
+                    document.getElementById('fallback-mode').style.display = 'block';
+                });
         }
         
         onSessionStarted(session) {
+            logger.info('AR session started, configuring');
             this.startARButton.style.display = 'none';
             this.placeDogButton.style.display = 'block';
             
@@ -241,13 +518,13 @@
                 this.dog = gltf.scene;
                 
                 // Scale if needed (adjust based on your model size)
-                this.dog.scale.set(0.5, 0.5, 0.5);
+                this.dog.scale.set(0.15, 0.15, 0.15);
                 
                 // Center the model if needed
                 const box = new THREE.Box3().setFromObject(this.dog);
                 const center = box.getCenter(new THREE.Vector3());
                 this.dog.position.x += (this.dog.position.x - center.x);
-                this.dog.position.y += (this.dog.position.y - center.y);
+                this.dog.position.y += (this.dog.position.y - center.y) + 0.3;
                 this.dog.position.z += (this.dog.position.z - center.z);
                 
                 // Setup animations if your model has them
@@ -317,51 +594,51 @@
             
             // Body
             const body = new THREE.Mesh(
-                new THREE.CapsuleGeometry(0.2, 0.4, 4, 8),
+                new THREE.CapsuleGeometry(0.06, 0.12, 4, 8),
                 new THREE.MeshStandardMaterial({ color: 0xA0522D })
             );
             body.rotation.z = Math.PI / 2;
-            body.position.y = 0.2;
+            body.position.y = 0.12;
             dogGroup.add(body);
             
             // Head
             const head = new THREE.Mesh(
-                new THREE.SphereGeometry(0.15, 16, 16),
+                new THREE.SphereGeometry(0.045, 16, 16),
                 new THREE.MeshStandardMaterial({ color: 0x8B4513 })
             );
-            head.position.set(0.3, 0.3, 0);
+            head.position.set(0.09, 0.16, 0);
             dogGroup.add(head);
             
             // Eyes
-            const eyeGeometry = new THREE.SphereGeometry(0.03, 8, 8);
+            const eyeGeometry = new THREE.SphereGeometry(0.01, 8, 8);
             const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
             
             const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-            leftEye.position.set(0.38, 0.35, 0.08);
+            leftEye.position.set(0.12, 0.18, 0.025);
             dogGroup.add(leftEye);
             
             const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-            rightEye.position.set(0.38, 0.35, -0.08);
+            rightEye.position.set(0.12, 0.18, -0.025);
             dogGroup.add(rightEye);
             
             // Nose
             const nose = new THREE.Mesh(
-                new THREE.SphereGeometry(0.04, 8, 8),
+                new THREE.SphereGeometry(0.012, 8, 8),
                 new THREE.MeshBasicMaterial({ color: 0x000000 })
             );
-            nose.position.set(0.45, 0.25, 0);
+            nose.position.set(0.14, 0.15, 0);
             dogGroup.add(nose);
             
             // Legs
-            const legGeometry = new THREE.CylinderGeometry(0.04, 0.04, 0.2, 8);
+            const legGeometry = new THREE.CylinderGeometry(0.012, 0.012, 0.06, 8);
             const legMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
             
             const legs = [];
             const legPositions = [
-                [-0.1, 0.1, 0.15],
-                [-0.1, 0.1, -0.15],
-                [0.1, 0.1, 0.15],
-                [0.1, 0.1, -0.15]
+                [-0.04, 0.1, 0.04],
+                [-0.04, 0.1, -0.04],
+                [0.04, 0.1, 0.04],
+                [0.04, 0.1, -0.04]
             ];
             
             legPositions.forEach(pos => {
@@ -373,10 +650,10 @@
             
             // Tail
             const tail = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.03, 0.01, 0.2, 8),
+                new THREE.CylinderGeometry(0.01, 0.003, 0.06, 8),
                 new THREE.MeshStandardMaterial({ color: 0x8B4513 })
             );
-            tail.position.set(-0.3, 0.2, 0);
+            tail.position.set(-0.1, 0.12, 0);
             tail.rotation.z = Math.PI / 4;
             dogGroup.add(tail);
             
@@ -388,24 +665,24 @@
             this.dogAnimations = {
                 idle: { duration: 2000, onUpdate: (t) => {
                     const y = 0.05 * Math.sin(t * Math.PI);
-                    body.position.y = 0.2 + y * 0.2;
-                    head.position.y = 0.3 + y * 0.2;
+                    body.position.y = 0.12 + y * 0.02;
+                    head.position.y = 0.16 + y * 0.02;
                 }},
                 walking: { duration: 1000, onUpdate: (t) => {
                     const cycle = t * Math.PI * 2;
                     legs.forEach((leg, i) => {
-                        leg.position.y = 0.1 + Math.abs(Math.sin(cycle + i * Math.PI/2)) * 0.05;
+                        leg.position.y = 0.06 + Math.abs(Math.sin(cycle + i * Math.PI/2)) * 0.005;
                     });
-                    body.position.y = 0.2 + Math.sin(cycle * 2) * 0.02;
+                    body.position.y = 0.12 + Math.sin(cycle * 2) * 0.002;
                 }},
                 excited: { duration: 800, onUpdate: (t) => {
                     const cycle = t * Math.PI * 4;
-                    body.position.y = 0.2 + Math.abs(Math.sin(cycle)) * 0.1;
-                    head.position.y = 0.3 + Math.abs(Math.sin(cycle)) * 0.1;
-                    tail.rotation.z = Math.PI / 4 + Math.sin(cycle * 2) * 0.5;
+                    body.position.y = 0.12 + Math.abs(Math.sin(cycle)) * 0.01;
+                    head.position.y = 0.16 + Math.abs(Math.sin(cycle)) * 0.01;
+                    tail.rotation.z = Math.PI / 4 + Math.sin(cycle * 2) * 0.05;
                 }},
                 sleeping: { duration: 3000, onUpdate: (t) => {
-                    const breathing = Math.sin(t * Math.PI) * 0.02;
+                    const breathing = Math.sin(t * Math.PI) * 0.002;
                     body.scale.y = 1 + breathing;
                 }}
             };
@@ -710,8 +987,368 @@
     
     // Initialize the app when the page loads
     window.addEventListener('DOMContentLoaded', () => {
+        // Log initial diagnostic info
+        logger.info(`User Agent: ${navigator.userAgent}`);
+        logger.info(`Screen: ${window.innerWidth}x${window.innerHeight}, pixel ratio: ${window.devicePixelRatio}`);
+        logger.checkXRCapabilities();
+        
         const app = new ARDogApp();
     });
+    
+    // Fallback 3D Mode for devices without AR support
+    function startFallback3DMode() {
+        logger.info('Starting fallback 3D mode');
+        
+        // Create simple 3D scene
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        // Set background color
+        scene.background = new THREE.Color(0xaaaaaa);
+        
+        // Add lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+        
+        // Create renderer
+        const renderer = new THREE.WebGLRenderer({ 
+            canvas: document.getElementById('canvas'),
+            antialias: true
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        
+        // Position camera
+        camera.position.z = 3.0; // Increased from 1.5 to zoom out more
+        camera.position.y = 1.0; // Increased from 0.5 to look from a higher angle
+        camera.lookAt(0, 0, 0); // Look at the center
+        
+        // Add ground plane
+        const ground = new THREE.Mesh(
+            new THREE.PlaneGeometry(10, 10),
+            new THREE.MeshStandardMaterial({ color: 0x88aa88 })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.3;
+        scene.add(ground);
+        
+        // Add orbit controls via mouse drag
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        
+        document.addEventListener('mousedown', (e) => { 
+            isDragging = true; 
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+        
+        document.addEventListener('mouseup', () => { isDragging = false; });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                const deltaMove = {
+                    x: e.clientX - previousMousePosition.x,
+                    y: e.clientY - previousMousePosition.y
+                };
+                
+                // Rotate dog container based on mouse movement
+                if (dogContainer) {
+                    dogContainer.rotation.y += deltaMove.x * 0.01;
+                }
+                
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            }
+        });
+        
+        // Add touch support
+        document.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+                isDragging = true;
+                previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+        });
+        
+        document.addEventListener('touchend', () => { isDragging = false; });
+        
+        document.addEventListener('touchmove', (e) => {
+            if (isDragging && e.touches.length === 1) {
+                const deltaMove = {
+                    x: e.touches[0].clientX - previousMousePosition.x,
+                    y: e.touches[0].clientY - previousMousePosition.y
+                };
+                
+                // Rotate dog container based on touch movement
+                if (dogContainer) {
+                    dogContainer.rotation.y += deltaMove.x * 0.01;
+                }
+                
+                previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                e.preventDefault(); // Prevent scrolling
+            }
+        });
+        
+        // Create container for dog (so we can rotate it)
+        const dogContainer = new THREE.Group();
+        scene.add(dogContainer);
+        
+        // Load dog model
+        const loader = new THREE.GLTFLoader();
+        let mixer = null;
+        
+        // Status update
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = 'Loading dog model...';
+        
+        // Show UI buttons
+        document.getElementById('talk').style.display = 'block';
+        document.getElementById('pet').style.display = 'block';
+        document.getElementById('throw-ball').style.display = 'block';
+        
+        // Try to load the dog model
+        loader.load(
+            '/assets/corgy.glb',
+            (gltf) => {
+                const dog = gltf.scene;
+                dog.scale.set(0.15, 0.15, 0.15);
+                
+                // Center the model
+                const box = new THREE.Box3().setFromObject(dog);
+                const center = box.getCenter(new THREE.Vector3());
+                dog.position.x += (dog.position.x - center.x);
+                dog.position.y += (dog.position.y - center.y) + 0.3;
+                dog.position.z += (dog.position.z - center.z);
+                
+                // Add to container
+                dogContainer.add(dog);
+                
+                // Setup animations
+                if (gltf.animations && gltf.animations.length) {
+                    mixer = new THREE.AnimationMixer(dog);
+                    const action = mixer.clipAction(gltf.animations[0]);
+                    action.play();
+                }
+                
+                statusEl.textContent = '3D Mode Active - Drag to rotate view';
+                logger.info('Dog model loaded in 3D mode');
+            },
+            (xhr) => {
+                const percent = Math.floor(xhr.loaded / xhr.total * 100);
+                statusEl.textContent = `Loading dog model: ${percent}%`;
+            },
+            (error) => {
+                console.error('Error loading dog model:', error);
+                statusEl.textContent = 'Error loading dog. Using fallback.';
+                
+                // Create a simple dog placeholder
+                createPrimitiveDog(dogContainer);
+            }
+        );
+        
+        // Clock for animations
+        const clock = new THREE.Clock();
+        
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Update animations
+            if (mixer) {
+                mixer.update(clock.getDelta());
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        // Start animation loop
+        animate();
+        
+        // Connect interaction buttons
+        document.getElementById('talk').addEventListener('click', () => {
+            document.getElementById('speech-input').style.display = 'block';
+            document.getElementById('speech-input').focus();
+        });
+        
+        document.getElementById('speech-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const text = document.getElementById('speech-input').value.trim();
+                if (text) {
+                    statusEl.textContent = `You: ${text}`;
+                    document.getElementById('speech-input').value = '';
+                    document.getElementById('speech-input').style.display = 'none';
+                    
+                    // Show dog thinking
+                    document.getElementById('thinking').style.display = 'block';
+                    
+                    // Simulate response after delay
+                    setTimeout(() => {
+                        document.getElementById('thinking').style.display = 'none';
+                        const responses = [
+                            "wags tail excitedly",
+                            "tilts head curiously",
+                            "barks happily",
+                            "looks at you with interest"
+                        ];
+                        statusEl.textContent = `Dog: ${responses[Math.floor(Math.random() * responses.length)]}`;
+                    }, 1500);
+                }
+            }
+        });
+        
+        document.getElementById('pet').addEventListener('click', () => {
+            statusEl.textContent = "You pet the dog";
+            
+            // Show dog thinking
+            document.getElementById('thinking').style.display = 'block';
+            
+            // Simulate response after delay
+            setTimeout(() => {
+                document.getElementById('thinking').style.display = 'none';
+                statusEl.textContent = "Dog: wags tail happily and leans into the pets";
+            }, 1000);
+        });
+        
+        document.getElementById('throw-ball').addEventListener('click', () => {
+            statusEl.textContent = "You threw a ball";
+            
+            // Create a ball if it doesn't exist
+            let ball = scene.getObjectByName("ball");
+            if (!ball) {
+                ball = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.05, 16, 16),
+                    new THREE.MeshStandardMaterial({ color: 0xff0000 })
+                );
+                ball.name = "ball";
+                scene.add(ball);
+            }
+            
+            // Position the ball
+            ball.position.set(0, 0.3, 0);
+            ball.visible = true;
+            
+            // Animate the ball throw
+            const startPos = ball.position.clone();
+            const endPos = new THREE.Vector3(
+                (Math.random() - 0.5) * 2,
+                0.05,
+                (Math.random() - 0.5) * 2
+            );
+            
+            const startTime = Date.now();
+            
+            function animateBall() {
+                const progress = (Date.now() - startTime) / 1000; // 1 second animation
+                
+                if (progress < 1) {
+                    // Parabolic arc
+                    const t = progress;
+                    ball.position.x = startPos.x + (endPos.x - startPos.x) * t;
+                    ball.position.z = startPos.z + (endPos.z - startPos.z) * t;
+                    ball.position.y = startPos.y + 0.5 * Math.sin(Math.PI * t); // Arc height
+                    
+                    requestAnimationFrame(animateBall);
+                } else {
+                    ball.position.copy(endPos);
+                    
+                    // Show dog thinking
+                    document.getElementById('thinking').style.display = 'block';
+                    
+                    // Dog responds after the ball lands
+                    setTimeout(() => {
+                        document.getElementById('thinking').style.display = 'none';
+                        statusEl.textContent = "Dog: barks excitedly and chases after the ball";
+                    }, 1000);
+                }
+            }
+            
+            animateBall();
+        });
+    }
+    
+    // Function to create primitive dog for fallback
+    function createPrimitiveDog(container) {
+        // Body
+        const body = new THREE.Mesh(
+            new THREE.CapsuleGeometry(0.06, 0.12, 4, 8),
+            new THREE.MeshStandardMaterial({ color: 0xA0522D })
+        );
+        body.rotation.z = Math.PI / 2;
+        body.position.y = 0.12;
+        container.add(body);
+        
+        // Head
+        const head = new THREE.Mesh(
+            new THREE.SphereGeometry(0.045, 16, 16),
+            new THREE.MeshStandardMaterial({ color: 0x8B4513 })
+        );
+        head.position.set(0.09, 0.16, 0);
+        container.add(head);
+        
+        // Eyes
+        const eyeGeometry = new THREE.SphereGeometry(0.01, 8, 8);
+        const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+        
+        const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        leftEye.position.set(0.12, 0.18, 0.025);
+        container.add(leftEye);
+        
+        const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        rightEye.position.set(0.12, 0.18, -0.025);
+        container.add(rightEye);
+        
+        // Nose
+        const nose = new THREE.Mesh(
+            new THREE.SphereGeometry(0.012, 8, 8),
+            new THREE.MeshBasicMaterial({ color: 0x000000 })
+        );
+        nose.position.set(0.14, 0.15, 0);
+        container.add(nose);
+        
+        // Legs
+        const legGeometry = new THREE.CylinderGeometry(0.012, 0.012, 0.06, 8);
+        const legMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+        
+        const legPositions = [
+            [-0.04, 0.1, 0.04],
+            [-0.04, 0.1, -0.04],
+            [0.04, 0.1, 0.04],
+            [0.04, 0.1, -0.04]
+        ];
+        
+        legPositions.forEach(pos => {
+            const leg = new THREE.Mesh(legGeometry, legMaterial);
+            leg.position.set(...pos);
+            container.add(leg);
+        });
+        
+        // Tail
+        const tail = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.01, 0.003, 0.06, 8),
+            new THREE.MeshStandardMaterial({ color: 0x8B4513 })
+        );
+        tail.position.set(-0.1, 0.12, 0);
+        tail.rotation.z = Math.PI / 4;
+        container.add(tail);
+        
+        // Move entire container up to clear the ground
+        container.position.y = 0.05;
+        
+        // Simple animation with smaller amplitude for the smaller dog
+        const animateDog = () => {
+            const time = Date.now() * 0.001;
+            body.position.y = 0.12 + Math.sin(time * 2) * 0.006;
+            head.position.y = 0.16 + Math.sin(time * 2) * 0.006;
+            tail.rotation.z = Math.PI / 4 + Math.sin(time * 3) * 0.2;
+            
+            requestAnimationFrame(animateDog);
+        };
+        
+        animateDog();
+        
+        logger.info('Primitive dog created for fallback');
+        document.getElementById('status').textContent = '3D Mode Active - Drag to rotate view';
+    }
     </script>
 </body>
 </html>
