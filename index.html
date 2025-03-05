@@ -223,12 +223,95 @@
         async loadDogModel() {
             this.statusEl.textContent = 'Loading dog model...';
             
-            // For this example, we'll simulate loading a dog model
-            // In a real app, you would use GLTFLoader to load a model
+            // Load the corgy.glb model using GLTFLoader
+            const loader = new THREE.GLTFLoader();
             
-            // Simulate loading delay
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            
+            try {
+                const gltf = await new Promise((resolve, reject) => {
+                    loader.load(
+                        '/assets/corgy.glb',  // Path to the model
+                        resolve,
+                        (xhr) => {
+                            console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+                        },
+                        reject
+                    );
+                });
+                
+                this.dog = gltf.scene;
+                
+                // Scale if needed (adjust based on your model size)
+                this.dog.scale.set(0.5, 0.5, 0.5);
+                
+                // Center the model if needed
+                const box = new THREE.Box3().setFromObject(this.dog);
+                const center = box.getCenter(new THREE.Vector3());
+                this.dog.position.x += (this.dog.position.x - center.x);
+                this.dog.position.y += (this.dog.position.y - center.y);
+                this.dog.position.z += (this.dog.position.z - center.z);
+                
+                // Setup animations if your model has them
+                if (gltf.animations && gltf.animations.length) {
+                    this.mixer = new THREE.AnimationMixer(this.dog);
+                    
+                    // Store animations
+                    gltf.animations.forEach(clip => {
+                        const action = this.mixer.clipAction(clip);
+                        this.dogAnimations[clip.name] = action;
+                    });
+                    
+                    // Define animation mappings
+                    if (!this.dogAnimations['idle'] && gltf.animations.length > 0) {
+                        // If no specific 'idle' animation, use the first one as default
+                        this.dogAnimations['idle'] = this.mixer.clipAction(gltf.animations[0]);
+                    }
+                    
+                    // Check for other common animations and create mappings
+                    const animationNames = gltf.animations.map(a => a.name.toLowerCase());
+                    
+                    if (!this.dogAnimations['walking']) {
+                        // Try to find walking animation
+                        const walkIndex = animationNames.findIndex(n => 
+                            n.includes('walk') || n.includes('run') || n.includes('trot'));
+                        if (walkIndex >= 0) {
+                            this.dogAnimations['walking'] = this.mixer.clipAction(gltf.animations[walkIndex]);
+                        } else {
+                            // Fallback to idle
+                            this.dogAnimations['walking'] = this.dogAnimations['idle'];
+                        }
+                    }
+                    
+                    if (!this.dogAnimations['excited']) {
+                        // Try to find excited animation
+                        const excitedIndex = animationNames.findIndex(n => 
+                            n.includes('jump') || n.includes('bark') || n.includes('excited'));
+                        if (excitedIndex >= 0) {
+                            this.dogAnimations['excited'] = this.mixer.clipAction(gltf.animations[excitedIndex]);
+                        } else {
+                            // Fallback to idle
+                            this.dogAnimations['excited'] = this.dogAnimations['idle'];
+                        }
+                    }
+                    
+                    // Play default animation
+                    this.playDogAnimation('idle');
+                }
+                
+                this.dog.visible = false;  // Hide until placed
+                this.scene.add(this.dog);
+                
+                this.statusEl.textContent = 'Dog model loaded! Find a surface to place it.';
+                
+            } catch (error) {
+                console.error('Error loading dog model:', error);
+                this.statusEl.textContent = 'Error loading dog model. Using fallback.';
+                
+                // Fallback to primitive dog if model loading fails
+                this.createPrimitiveDog();
+            }
+        }
+        
+        createPrimitiveDog() {
             // Create a simple dog placeholder using primitives
             const dogGroup = new THREE.Group();
             
@@ -249,30 +332,36 @@
             head.position.set(0.3, 0.3, 0);
             dogGroup.add(head);
             
-            // Ears
-            const earLeft = new THREE.Mesh(
-                new THREE.ConeGeometry(0.06, 0.12, 16),
-                new THREE.MeshStandardMaterial({ color: 0x8B4513 })
-            );
-            earLeft.position.set(0.33, 0.42, 0.07);
-            earLeft.rotation.x = -Math.PI / 4;
-            dogGroup.add(earLeft);
+            // Eyes
+            const eyeGeometry = new THREE.SphereGeometry(0.03, 8, 8);
+            const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
             
-            const earRight = earLeft.clone();
-            earRight.position.z = -0.07;
-            earRight.rotation.x = Math.PI / 4;
-            dogGroup.add(earRight);
+            const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+            leftEye.position.set(0.38, 0.35, 0.08);
+            dogGroup.add(leftEye);
+            
+            const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+            rightEye.position.set(0.38, 0.35, -0.08);
+            dogGroup.add(rightEye);
+            
+            // Nose
+            const nose = new THREE.Mesh(
+                new THREE.SphereGeometry(0.04, 8, 8),
+                new THREE.MeshBasicMaterial({ color: 0x000000 })
+            );
+            nose.position.set(0.45, 0.25, 0);
+            dogGroup.add(nose);
             
             // Legs
-            const legGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.2);
+            const legGeometry = new THREE.CylinderGeometry(0.04, 0.04, 0.2, 8);
             const legMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
             
             const legs = [];
             const legPositions = [
-                [0.1, 0.1, 0.15], // front right
-                [0.1, 0.1, -0.15], // front left
-                [-0.2, 0.1, 0.15], // back right
-                [-0.2, 0.1, -0.15] // back left
+                [-0.1, 0.1, 0.15],
+                [-0.1, 0.1, -0.15],
+                [0.1, 0.1, 0.15],
+                [0.1, 0.1, -0.15]
             ];
             
             legPositions.forEach(pos => {
@@ -284,21 +373,18 @@
             
             // Tail
             const tail = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.02, 0.01, 0.2),
+                new THREE.CylinderGeometry(0.03, 0.01, 0.2, 8),
                 new THREE.MeshStandardMaterial({ color: 0x8B4513 })
             );
-            tail.position.set(-0.3, 0.25, 0);
+            tail.position.set(-0.3, 0.2, 0);
             tail.rotation.z = Math.PI / 4;
             dogGroup.add(tail);
             
-            // Scale and position
-            dogGroup.scale.set(0.5, 0.5, 0.5);
-            dogGroup.visible = false;
-            
+            // Add to scene
             this.dog = dogGroup;
             this.scene.add(this.dog);
             
-            // Simulate animations
+            // Define primitive animations
             this.dogAnimations = {
                 idle: { duration: 2000, onUpdate: (t) => {
                     const y = 0.05 * Math.sin(t * Math.PI);
@@ -324,25 +410,69 @@
                 }}
             };
             
-            this.playDogAnimation('idle');
-            this.statusEl.textContent = 'Find a surface to place your dog';
-        }
-        
-        playDogAnimation(name) {
-            this.currentAnimation = {
-                name,
-                startTime: Date.now(),
-                ...this.dogAnimations[name]
+            // Override the updateDogAnimation method for primitive animations
+            this.updateDogAnimationOriginal = this.updateDogAnimation;
+            this.updateDogAnimation = () => {
+                if (!this.currentAnimation || !this.dog) return;
+                
+                const elapsed = Date.now() - this.currentAnimation.startTime;
+                const t = (elapsed % this.currentAnimation.duration) / this.currentAnimation.duration;
+                
+                this.currentAnimation.onUpdate(t);
             };
+            
+            // Override the playDogAnimation method for primitive animations
+            this.playDogAnimationOriginal = this.playDogAnimation;
+            this.playDogAnimation = (name) => {
+                this.currentAnimation = {
+                    name,
+                    startTime: Date.now(),
+                    ...this.dogAnimations[name]
+                };
+            };
+            
+            this.playDogAnimation('idle');
+            this.dog.visible = false; // Hide until placed
+            this.statusEl.textContent = 'Using fallback dog model. Find a surface to place it.';
         }
         
         updateDogAnimation() {
-            if (!this.currentAnimation || !this.dog) return;
+            // Update animation mixer if it exists
+            if (this.mixer) {
+                const delta = this.clock.getDelta();
+                this.mixer.update(delta);
+            }
+        }
+        
+        playDogAnimation(name) {
+            if (!this.dogAnimations || Object.keys(this.dogAnimations).length === 0) {
+                return; // No animations available
+            }
             
-            const elapsed = Date.now() - this.currentAnimation.startTime;
-            const t = (elapsed % this.currentAnimation.duration) / this.currentAnimation.duration;
+            // Stop any current animation
+            if (this.currentAnimation) {
+                this.currentAnimation.fadeOut(0.5);
+            }
             
-            this.currentAnimation.onUpdate(t);
+            // Get animation by name (case insensitive)
+            let animation = this.dogAnimations[name];
+            if (!animation) {
+                // Try lowercase
+                animation = this.dogAnimations[name.toLowerCase()];
+            }
+            
+            // If still not found, use idle as fallback
+            if (!animation && this.dogAnimations['idle']) {
+                animation = this.dogAnimations['idle'];
+            } else if (!animation && Object.values(this.dogAnimations).length > 0) {
+                // Last resort: just use the first available animation
+                animation = Object.values(this.dogAnimations)[0];
+            }
+            
+            if (animation) {
+                animation.reset().fadeIn(0.5).play();
+                this.currentAnimation = animation;
+            }
         }
         
         placeDog() {
