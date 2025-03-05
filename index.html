@@ -661,7 +661,7 @@
             this.dog = dogGroup;
             this.scene.add(this.dog);
             
-            // Define primitive animations
+            // Define primitive animations with more variety
             this.dogAnimations = {
                 idle: { duration: 2000, onUpdate: (t) => {
                     const y = 0.05 * Math.sin(t * Math.PI);
@@ -674,16 +674,48 @@
                         leg.position.y = 0.06 + Math.abs(Math.sin(cycle + i * Math.PI/2)) * 0.005;
                     });
                     body.position.y = 0.12 + Math.sin(cycle * 2) * 0.002;
+                    // Add slight head bob while walking
+                    head.position.y = 0.16 + Math.sin(cycle * 2) * 0.005;
                 }},
                 excited: { duration: 800, onUpdate: (t) => {
                     const cycle = t * Math.PI * 4;
                     body.position.y = 0.12 + Math.abs(Math.sin(cycle)) * 0.01;
                     head.position.y = 0.16 + Math.abs(Math.sin(cycle)) * 0.01;
                     tail.rotation.z = Math.PI / 4 + Math.sin(cycle * 2) * 0.05;
+                    // Add slight body rotation for more excitement
+                    body.rotation.x = Math.sin(cycle) * 0.05;
                 }},
                 sleeping: { duration: 3000, onUpdate: (t) => {
                     const breathing = Math.sin(t * Math.PI) * 0.002;
                     body.scale.y = 1 + breathing;
+                    // Lower head position for sleeping pose
+                    head.position.y = 0.14 + breathing * 0.5;
+                }},
+                // New animations
+                run: { duration: 600, onUpdate: (t) => {
+                    const cycle = t * Math.PI * 3; // Faster cycle for running
+                    legs.forEach((leg, i) => {
+                        leg.position.y = 0.06 + Math.abs(Math.sin(cycle + i * Math.PI/2)) * 0.01;
+                    });
+                    body.position.y = 0.12 + Math.sin(cycle * 2) * 0.005;
+                    head.position.y = 0.16 + Math.sin(cycle * 2) * 0.008;
+                    tail.rotation.z = Math.PI / 4 + Math.sin(cycle) * 0.1;
+                }},
+                fetch: { duration: 1500, onUpdate: (t) => {
+                    if (t < 0.5) {
+                        // Running to fetch
+                        const cycle = t * Math.PI * 6;
+                        legs.forEach((leg, i) => {
+                            leg.position.y = 0.06 + Math.abs(Math.sin(cycle + i * Math.PI/2)) * 0.01;
+                        });
+                        body.position.y = 0.12 + Math.sin(cycle * 2) * 0.005;
+                    } else {
+                        // Coming back
+                        const cycle = (t - 0.5) * Math.PI * 4;
+                        body.position.y = 0.12 + Math.abs(Math.sin(cycle)) * 0.01;
+                        head.position.y = 0.16 + Math.abs(Math.sin(cycle)) * 0.01;
+                        tail.rotation.z = Math.PI / 4 + Math.sin(cycle * 2) * 0.1;
+                    }
                 }}
             };
             
@@ -866,13 +898,13 @@
                 // Simulate responses based on prompt keywords (fallback)
                 if (prompt.includes("placed you in")) {
                     response = "wags tail excitedly, looks around curiously, then sits and tilts head";
-                    this.playDogAnimation('excited');
+                    // Animation handled by behavior interpreter now
                 } else if (prompt.includes("petting you")) {
                     response = "closes eyes happily, leans into the pets, tail thumps against floor";
-                    this.playDogAnimation('idle');
+                    // Animation handled by behavior interpreter now
                 } else if (prompt.includes("threw a ball")) {
                     response = "barks excitedly, runs to ball, picks it up and brings it back, tail wagging";
-                    this.playDogAnimation('walking');
+                    // Animation handled by behavior interpreter now
                 } else if (prompt.includes("says to you")) {
                     // Pick a random response for speech
                     const responses = [
@@ -882,7 +914,7 @@
                         "sits attentively, looking at you with head tilted"
                     ];
                     response = responses[Math.floor(Math.random() * responses.length)];
-                    this.playDogAnimation(Math.random() > 0.5 ? 'excited' : 'idle');
+                    // Animation handled by behavior interpreter now
                 } else {
                     response = "looks at you with head tilted";
                 }
@@ -899,7 +931,254 @@
             this.statusEl.textContent = `Dog: ${response}`;
             this.thinkingEl.style.display = 'none';
             
+            // Process dog behavior based on AI response
+            this.interpretAndExecuteBehavior(response);
+            
             return response;
+        }
+        
+        // New behavior interpreter system
+        interpretAndExecuteBehavior(aiResponse) {
+            logger.info(`Interpreting behavior: "${aiResponse}"`);
+            
+            // Parse the AI response for behavior cues
+            const behaviors = this.parseBehaviors(aiResponse);
+            
+            // Execute the behaviors in sequence
+            this.executeBehaviorSequence(behaviors);
+        }
+        
+        parseBehaviors(response) {
+            // Common dog behavior keywords to look for
+            const behaviorMap = {
+                // Body animations
+                'wag': { type: 'animation', action: 'excited', duration: 3000 },
+                'tail': { type: 'animation', action: 'excited', duration: 2500 },
+                'jump': { type: 'animation', action: 'excited', duration: 1500 },
+                'excited': { type: 'animation', action: 'excited', duration: 3000 },
+                'bark': { type: 'animation', action: 'excited', duration: 1000, sound: 'bark' },
+                'play': { type: 'animation', action: 'excited', duration: 3000 },
+                'run': { type: 'movement', action: 'run', distance: 1, duration: 2000 },
+                'sit': { type: 'animation', action: 'idle', duration: 2000 },
+                'lies down': { type: 'animation', action: 'sleeping', duration: 3000 },
+                'lying': { type: 'animation', action: 'sleeping', duration: 3000 },
+                'sleep': { type: 'animation', action: 'sleeping', duration: 4000 },
+                'tilt': { type: 'animation', action: 'idle', duration: 2000 },
+                'sniff': { type: 'animation', action: 'walking', duration: 1500 },
+                'walk': { type: 'movement', action: 'walk', distance: 0.5, duration: 2000 },
+                'pant': { type: 'animation', action: 'idle', duration: 2000 },
+                'lick': { type: 'animation', action: 'excited', duration: 1000 },
+                'whine': { type: 'animation', action: 'idle', duration: 1500, sound: 'whine' },
+                
+                // Emotional states
+                'happy': { type: 'emotion', value: 'happy' },
+                'sad': { type: 'emotion', value: 'sad' },
+                'curious': { type: 'emotion', value: 'curious' },
+                'scared': { type: 'emotion', value: 'scared' },
+                'confused': { type: 'emotion', value: 'confused' },
+                'attentive': { type: 'emotion', value: 'attentive' },
+                
+                // Movements
+                'brings it back': { type: 'movement', action: 'fetch', target: 'ball', duration: 3000 },
+                'picks it up': { type: 'movement', action: 'pickup', target: 'ball', duration: 1500 },
+                'rolls over': { type: 'animation', action: 'excited', duration: 2000 },
+                'spins': { type: 'movement', action: 'spin', duration: 1500 },
+                'circles': { type: 'movement', action: 'circle', duration: 2000 },
+                'comes': { type: 'movement', action: 'approach', target: 'user', duration: 2000 },
+                'follows': { type: 'movement', action: 'follow', target: 'user', duration: 3000 },
+                'chases': { type: 'movement', action: 'chase', target: 'ball', duration: 2500 },
+            };
+            
+            // Find matching behaviors in the response
+            const behaviors = [];
+            const responseLower = response.toLowerCase();
+            
+            // Check for comma or and separated actions
+            const segments = responseLower.split(/,|\band\b/);
+            
+            segments.forEach(segment => {
+                // Find all behavior matches in this segment
+                const matches = Object.keys(behaviorMap).filter(key => segment.includes(key));
+                
+                if (matches.length > 0) {
+                    // Use the longest matching behavior if multiple match
+                    const bestMatch = matches.sort((a, b) => b.length - a.length)[0];
+                    behaviors.push({...behaviorMap[bestMatch]});
+                } else if (segment.trim().length > 0) {
+                    // If no specific match, default to an emotion based on segment content
+                    // This is a simple sentiment analysis
+                    if (segment.match(/happy|excited|playful|joy|wag/i)) {
+                        behaviors.push({ type: 'emotion', value: 'happy' });
+                    } else if (segment.match(/sad|upset|unhappy|down/i)) {
+                        behaviors.push({ type: 'emotion', value: 'sad' });
+                    } else if (segment.match(/curious|interest|wonder/i)) {
+                        behaviors.push({ type: 'emotion', value: 'curious' });
+                    } else if (segment.match(/scared|afraid|fear|nervous/i)) {
+                        behaviors.push({ type: 'emotion', value: 'scared' });
+                    } else if (segment.match(/confused|puzzled|unsure/i)) {
+                        behaviors.push({ type: 'emotion', value: 'confused' });
+                    } else {
+                        // Default animation if we can't categorize the segment
+                        behaviors.push({ type: 'animation', action: 'idle', duration: 2000 });
+                    }
+                }
+            });
+            
+            // If no behaviors found, default to idle
+            if (behaviors.length === 0) {
+                behaviors.push({ type: 'animation', action: 'idle', duration: 2000 });
+            }
+            
+            logger.info(`Parsed behaviors: ${JSON.stringify(behaviors)}`);
+            return behaviors;
+        }
+        
+        async executeBehaviorSequence(behaviors) {
+            // Execute each behavior in sequence
+            for (const behavior of behaviors) {
+                await this.executeBehavior(behavior);
+            }
+            
+            // Return to idle state after all behaviors
+            this.playDogAnimation('idle');
+        }
+        
+        async executeBehavior(behavior) {
+            logger.info(`Executing behavior: ${JSON.stringify(behavior)}`);
+            
+            switch (behavior.type) {
+                case 'animation':
+                    // Play the animation and wait for completion
+                    this.playDogAnimation(behavior.action);
+                    if (behavior.sound) {
+                        this.playDogSound(behavior.sound);
+                    }
+                    await new Promise(resolve => setTimeout(resolve, behavior.duration));
+                    break;
+                    
+                case 'emotion':
+                    // Update the dog's emotional state
+                    this.dogState.mood = behavior.value;
+                    // Emotions affect animations
+                    switch (behavior.value) {
+                        case 'happy':
+                            this.playDogAnimation('excited');
+                            break;
+                        case 'sad':
+                            this.playDogAnimation('idle'); // We could add a sad animation later
+                            break;
+                        case 'curious':
+                        case 'confused':
+                            this.playDogAnimation('idle'); // For head tilting
+                            break;
+                        case 'scared':
+                            this.playDogAnimation('idle'); // Could add scared animation
+                            break;
+                        default:
+                            this.playDogAnimation('idle');
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    break;
+                    
+                case 'movement':
+                    // Handle movement behaviors
+                    await this.executeDogMovement(behavior);
+                    break;
+                    
+                default:
+                    this.playDogAnimation('idle');
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+        
+        async executeDogMovement(movementBehavior) {
+            const { action, target, distance, duration } = movementBehavior;
+            
+            // Play appropriate animation
+            this.playDogAnimation(action === 'run' ? 'excited' : 'walking');
+            
+            switch (action) {
+                case 'walk':
+                case 'run':
+                    // Simple movement animation
+                    // In real implementation, we would animate position change
+                    // For now, we'll just delay to simulate movement
+                    await new Promise(resolve => setTimeout(resolve, duration));
+                    break;
+                    
+                case 'fetch':
+                case 'chase':
+                    if (this.ball && this.ball.visible) {
+                        // Animate the dog moving to the ball position
+                        // In a more complex implementation, we'd move the dog model
+                        this.playDogAnimation('walking');
+                        await new Promise(resolve => setTimeout(resolve, duration * 0.6));
+                        
+                        // Then animate returning with the ball
+                        this.playDogAnimation('excited');
+                        // Hide the ball as if the dog picked it up
+                        this.ball.visible = false;
+                        await new Promise(resolve => setTimeout(resolve, duration * 0.4));
+                    } else {
+                        // Just play an excited animation if no ball
+                        this.playDogAnimation('excited');
+                        await new Promise(resolve => setTimeout(resolve, duration));
+                    }
+                    break;
+                    
+                case 'pickup':
+                    if (this.ball && this.ball.visible) {
+                        // Animate picking up the ball
+                        this.playDogAnimation('idle');
+                        await new Promise(resolve => setTimeout(resolve, duration * 0.5));
+                        
+                        // Hide the ball as if the dog picked it up
+                        this.ball.visible = false;
+                        await new Promise(resolve => setTimeout(resolve, duration * 0.5));
+                    } else {
+                        await new Promise(resolve => setTimeout(resolve, duration));
+                    }
+                    break;
+                    
+                case 'approach':
+                case 'follow':
+                    // Simulate approaching the user
+                    this.playDogAnimation('walking');
+                    await new Promise(resolve => setTimeout(resolve, duration));
+                    break;
+                    
+                case 'spin':
+                case 'circle':
+                    // For primitive dog, we can rotate the whole model
+                    const startTime = Date.now();
+                    const animate = () => {
+                        const elapsed = Date.now() - startTime;
+                        if (elapsed < duration) {
+                            // Rotate the dog model
+                            if (this.dog) {
+                                this.dog.rotation.y += 0.05;
+                            }
+                            requestAnimationFrame(animate);
+                        }
+                    };
+                    animate();
+                    await new Promise(resolve => setTimeout(resolve, duration));
+                    break;
+                    
+                default:
+                    await new Promise(resolve => setTimeout(resolve, duration));
+            }
+        }
+        
+        playDogSound(soundType) {
+            // In a real implementation, we would play actual sounds
+            // This is a placeholder for sound effects
+            logger.info(`Playing dog sound: ${soundType}`);
+            
+            // If we had sound effects, we would play them here
+            // For example:
+            // const sound = new Audio(`/assets/sounds/${soundType}.mp3`);
+            // sound.play();
         }
         
         /**
@@ -1164,7 +1443,7 @@
         // Start animation loop
         animate();
         
-        // Connect interaction buttons
+        // Connect interaction buttons with behavior interpreter
         document.getElementById('talk').addEventListener('click', () => {
             document.getElementById('speech-input').style.display = 'block';
             document.getElementById('speech-input').focus();
@@ -1190,7 +1469,11 @@
                             "barks happily",
                             "looks at you with interest"
                         ];
-                        statusEl.textContent = `Dog: ${responses[Math.floor(Math.random() * responses.length)]}`;
+                        const response = responses[Math.floor(Math.random() * responses.length)];
+                        statusEl.textContent = `Dog: ${response}`;
+                        
+                        // Interpret and execute dog behavior based on AI response
+                        interpretAndExecute3DModeBehavior(response, dogContainer, mixer);
                     }, 1500);
                 }
             }
@@ -1205,7 +1488,11 @@
             // Simulate response after delay
             setTimeout(() => {
                 document.getElementById('thinking').style.display = 'none';
-                statusEl.textContent = "Dog: wags tail happily and leans into the pets";
+                const response = "wags tail happily and leans into the pets";
+                statusEl.textContent = `Dog: ${response}`;
+                
+                // Interpret and execute dog behavior
+                interpretAndExecute3DModeBehavior(response, dogContainer, mixer);
             }, 1000);
         });
         
@@ -1257,16 +1544,148 @@
                     // Dog responds after the ball lands
                     setTimeout(() => {
                         document.getElementById('thinking').style.display = 'none';
-                        statusEl.textContent = "Dog: barks excitedly and chases after the ball";
+                        const response = "barks excitedly and chases after the ball";
+                        statusEl.textContent = `Dog: ${response}`;
+                        
+                        // Interpret and execute dog behavior
+                        interpretAndExecute3DModeBehavior(response, dogContainer, mixer, ball);
                     }, 1000);
                 }
             }
             
             animateBall();
         });
+        
+        // Add a separate behavior interpreter for 3D mode
+        function interpretAndExecute3DModeBehavior(response, dogModel, animMixer, ball) {
+            logger.info(`3D Mode: Interpreting behavior: "${response}"`);
+            
+            // For GLTF model with animation mixer
+            if (animMixer && animMixer._actions && animMixer._actions.length > 0) {
+                // Use the animation mixer
+                if (response.includes('wag') || response.includes('excit') || response.includes('happy')) {
+                    const action = animMixer.clipAction(animMixer._actions[0].getClip());
+                    action.setEffectiveTimeScale(1.5); // Speed up animation for excitement
+                    action.play();
+                } else if (response.includes('bark') || response.includes('jump')) {
+                    const action = animMixer.clipAction(animMixer._actions[0].getClip());
+                    action.setEffectiveTimeScale(2.0); // Even faster for barking/jumping
+                    action.play();
+                } else {
+                    const action = animMixer.clipAction(animMixer._actions[0].getClip());
+                    action.setEffectiveTimeScale(1.0); // Normal speed for other actions
+                    action.play();
+                }
+            } 
+            // For enhanced primitive dog model
+            else if (dogModel && dogModel.playAnimation) {
+                // Parse the response and play appropriate animations
+                if (response.includes('wag') || response.includes('tail')) {
+                    dogModel.playAnimation('waggingTail', 3000); // Wag tail for 3 seconds
+                    
+                    // Chain animations - return to idle after wagging
+                    setTimeout(() => {
+                        dogModel.playAnimation('idle');
+                    }, 3000);
+                }
+                else if (response.includes('run') || response.includes('chase')) {
+                    // If there's a ball to chase
+                    if (ball && ball.visible) {
+                        dogModel.playAnimation('running', 2000);
+                        
+                        // Move toward the ball
+                        const startPos = dogModel.position.clone();
+                        const targetPos = ball.position.clone();
+                        
+                        // Animate position change
+                        const moveStart = Date.now();
+                        const moveAnimation = () => {
+                            const elapsed = Date.now() - moveStart;
+                            if (elapsed < 2000) {
+                                const t = elapsed / 2000;
+                                
+                                // Move dog toward ball
+                                dogModel.position.x = startPos.x + (targetPos.x - startPos.x) * t;
+                                dogModel.position.z = startPos.z + (targetPos.z - startPos.z) * t;
+                                
+                                // Look at ball
+                                const lookAt = new THREE.Vector3(targetPos.x, dogModel.position.y, targetPos.z);
+                                dogModel.lookAt(lookAt);
+                                
+                                requestAnimationFrame(moveAnimation);
+                            } else {
+                                // Reached the ball
+                                if (ball) ball.visible = false;
+                                
+                                // Wag tail after getting the ball
+                                dogModel.playAnimation('waggingTail', 2000);
+                                
+                                // Return to idle
+                                setTimeout(() => {
+                                    dogModel.playAnimation('idle');
+                                }, 2000);
+                            }
+                        };
+                        
+                        moveAnimation();
+                    } else {
+                        // Just run in place if no ball
+                        dogModel.playAnimation('running', 2500);
+                        
+                        // Return to idle after running
+                        setTimeout(() => {
+                            dogModel.playAnimation('idle');
+                        }, 2500);
+                    }
+                }
+                else if (response.includes('walk')) {
+                    dogModel.playAnimation('walking', 3000);
+                    
+                    // Return to idle after walking
+                    setTimeout(() => {
+                        dogModel.playAnimation('idle');
+                    }, 3000);
+                }
+                else if (response.includes('bark')) {
+                    dogModel.playAnimation('barking', 1500);
+                    
+                    // Return to idle after barking
+                    setTimeout(() => {
+                        dogModel.playAnimation('idle');
+                    }, 1500);
+                }
+                else if (response.includes('tilt') || response.includes('curious')) {
+                    dogModel.playAnimation('headTilt', 2000);
+                    
+                    // Return to idle after head tilt
+                    setTimeout(() => {
+                        dogModel.playAnimation('idle');
+                    }, 2000);
+                }
+                else {
+                    // Default animation
+                    dogModel.playAnimation('idle');
+                }
+            }
+            // Basic primitive dog (old version) or simple behavior for any model
+            else if (dogModel) {
+                if (response.includes('wag') || response.includes('excit') || response.includes('happy')) {
+                    // Simple rotation animation for basic model
+                    const startTime = Date.now();
+                    const rotateAnimation = () => {
+                        const elapsed = Date.now() - startTime;
+                        if (elapsed < 2000) {
+                            dogModel.rotation.y += 0.05;
+                            requestAnimationFrame(rotateAnimation);
+                        }
+                    };
+                    rotateAnimation();
+                }
+            }
+        }
     }
     
-    // Function to create primitive dog for fallback
+    // Modify the createPrimitiveDog function for 3D mode to support more behaviors
     function createPrimitiveDog(container) {
         // Body
         const body = new THREE.Mesh(
@@ -1309,17 +1728,20 @@
         const legGeometry = new THREE.CylinderGeometry(0.012, 0.012, 0.06, 8);
         const legMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
         
+        const legs = [];
         const legPositions = [
-            [-0.04, 0.1, 0.04],
-            [-0.04, 0.1, -0.04],
-            [0.04, 0.1, 0.04],
-            [0.04, 0.1, -0.04]
+            [-0.04, 0.1, 0.04],  // back left
+            [-0.04, 0.1, -0.04], // back right
+            [0.04, 0.1, 0.04],   // front left
+            [0.04, 0.1, -0.04]   // front right
         ];
         
-        legPositions.forEach(pos => {
+        legPositions.forEach((pos, i) => {
             const leg = new THREE.Mesh(legGeometry, legMaterial);
             leg.position.set(...pos);
+            leg.name = `leg${i}`;
             container.add(leg);
+            legs.push(leg);
         });
         
         // Tail
@@ -1334,19 +1756,203 @@
         // Move entire container up to clear the ground
         container.position.y = 0.05;
         
-        // Simple animation with smaller amplitude for the smaller dog
-        const animateDog = () => {
-            const time = Date.now() * 0.001;
-            body.position.y = 0.12 + Math.sin(time * 2) * 0.006;
-            head.position.y = 0.16 + Math.sin(time * 2) * 0.006;
-            tail.rotation.z = Math.PI / 4 + Math.sin(time * 3) * 0.2;
-            
-            requestAnimationFrame(animateDog);
+        // Animation variables
+        let currentAnimation = 'idle';
+        let animationStartTime = Date.now();
+        let walkDirection = new THREE.Vector3(0, 0, 0);
+        
+        // Animation states
+        const animations = {
+            idle: {
+                duration: 2000,
+                update: (t) => {
+                    // Gentle breathing
+                    body.position.y = 0.12 + Math.sin(t * Math.PI) * 0.006;
+                    head.position.y = 0.16 + Math.sin(t * Math.PI) * 0.006;
+                    
+                    // Subtle tail movement
+                    tail.rotation.z = Math.PI / 4 + Math.sin(t * Math.PI) * 0.05;
+                }
+            },
+            walking: {
+                duration: 1000,
+                update: (t) => {
+                    const cycle = t * Math.PI * 2;
+                    
+                    // Diagonal leg pairs move together (realistic quadruped walking)
+                    // Front left and back right move together, front right and back left move together
+                    legs[0].position.y = 0.1 + Math.max(0, Math.sin(cycle)) * 0.02;         // back left
+                    legs[3].position.y = 0.1 + Math.max(0, Math.sin(cycle)) * 0.02;         // front right
+                    legs[1].position.y = 0.1 + Math.max(0, Math.sin(cycle + Math.PI)) * 0.02; // back right
+                    legs[2].position.y = 0.1 + Math.max(0, Math.sin(cycle + Math.PI)) * 0.02; // front left
+                    
+                    // Add leg forward/backward motion
+                    legs[0].position.x = legPositions[0][0] + Math.sin(cycle) * 0.01;
+                    legs[1].position.x = legPositions[1][0] + Math.sin(cycle + Math.PI) * 0.01;
+                    legs[2].position.x = legPositions[2][0] + Math.sin(cycle + Math.PI) * 0.01;
+                    legs[3].position.x = legPositions[3][0] + Math.sin(cycle) * 0.01;
+                    
+                    // Body moves slightly up and down with the steps
+                    body.position.y = 0.12 + Math.sin(cycle * 2) * 0.005;
+                    
+                    // Head bobs slightly with the walk cycle
+                    head.position.y = 0.16 + Math.sin(cycle * 2) * 0.008;
+                    
+                    // Tail swings with the walk
+                    tail.rotation.z = Math.PI / 4 + Math.sin(cycle) * 0.1;
+                }
+            },
+            waggingTail: {
+                duration: 400, // Faster for excited tail wagging
+                update: (t) => {
+                    const cycle = t * Math.PI * 2;
+                    
+                    // Energetic tail wagging (faster and wider movement)
+                    tail.rotation.z = Math.PI / 4 + Math.sin(cycle * 2) * 0.4;
+                    tail.rotation.y = Math.sin(cycle * 4) * 0.2;
+                    
+                    // Dog slightly shifts weight from side to side
+                    body.rotation.z = Math.PI / 2 + Math.sin(cycle) * 0.03;
+                    
+                    // Subtle happy bouncing
+                    body.position.y = 0.12 + Math.abs(Math.sin(cycle * 2)) * 0.01;
+                    head.position.y = 0.16 + Math.abs(Math.sin(cycle * 2)) * 0.01;
+                }
+            },
+            running: {
+                duration: 600, // Faster for running
+                update: (t) => {
+                    const cycle = t * Math.PI * 3; // Faster cycle for running
+                    
+                    // Exaggerated leg movements (higher steps)
+                    legs[0].position.y = 0.1 + Math.max(0, Math.sin(cycle)) * 0.04;
+                    legs[3].position.y = 0.1 + Math.max(0, Math.sin(cycle)) * 0.04;
+                    legs[1].position.y = 0.1 + Math.max(0, Math.sin(cycle + Math.PI)) * 0.04;
+                    legs[2].position.y = 0.1 + Math.max(0, Math.sin(cycle + Math.PI)) * 0.04;
+                    
+                    // Forward/backward leg motion
+                    legs[0].position.x = legPositions[0][0] + Math.sin(cycle) * 0.02;
+                    legs[1].position.x = legPositions[1][0] + Math.sin(cycle + Math.PI) * 0.02;
+                    legs[2].position.x = legPositions[2][0] + Math.sin(cycle + Math.PI) * 0.02;
+                    legs[3].position.x = legPositions[3][0] + Math.sin(cycle) * 0.02;
+                    
+                    // More pronounced body movement
+                    body.position.y = 0.12 + Math.sin(cycle * 2) * 0.01;
+                    
+                    // Head bobs more with running
+                    head.position.y = 0.16 + Math.sin(cycle * 2) * 0.015;
+                    
+                    // Tail streams behind when running
+                    tail.rotation.z = Math.PI / 5 + Math.sin(cycle) * 0.1;
+                }
+            },
+            barking: {
+                duration: 300, // Quick for barking
+                update: (t) => {
+                    const cycle = t * Math.PI * 2;
+                    
+                    // Head moves forward slightly when barking
+                    head.position.x = 0.09 + Math.abs(Math.sin(cycle * 4)) * 0.01;
+                    head.position.y = 0.16 + Math.sin(cycle * 4) * 0.005;
+                    
+                    // Mouth would open here if we had a separate mouth model
+                    
+                    // Slight body movement
+                    body.position.y = 0.12 + Math.abs(Math.sin(cycle * 4)) * 0.005;
+                }
+            },
+            headTilt: {
+                duration: 1500,
+                update: (t) => {
+                    // Tilt head to one side
+                    if (t < 0.3) {
+                        // Initial tilt motion
+                        head.rotation.z = t/0.3 * 0.3;
+                    } else if (t > 0.7) {
+                        // Return to normal
+                        head.rotation.z = Math.max(0, 0.3 - (t-0.7)/0.3 * 0.3);
+                    } else {
+                        // Hold the tilt
+                        head.rotation.z = 0.3;
+                    }
+                    
+                    // Subtle ear movement would go here if we had ear models
+                    
+                    // Eyes look up slightly
+                    leftEye.position.y = 0.18 + t * 0.005;
+                    rightEye.position.y = 0.18 + t * 0.005;
+                }
+            }
         };
         
+        // Function to play a specific animation
+        function playAnimation(name, duration = null) {
+            if (animations[name]) {
+                currentAnimation = name;
+                animationStartTime = Date.now();
+                
+                // Optional custom duration
+                if (duration) animations[name].customDuration = duration;
+                else delete animations[name].customDuration;
+                
+                // Reset positions when changing animations
+                resetPositions();
+            }
+        }
+        
+        // Reset all body parts to default positions
+        function resetPositions() {
+            // Reset legs
+            legs.forEach((leg, i) => {
+                leg.position.set(...legPositions[i]);
+            });
+            
+            // Reset head rotation
+            head.rotation.set(0, 0, 0);
+            
+            // Reset eye positions
+            leftEye.position.set(0.12, 0.18, 0.025);
+            rightEye.position.set(0.12, 0.18, -0.025);
+            
+            // Reset head position
+            head.position.set(0.09, 0.16, 0);
+            
+            // Reset body
+            body.position.y = 0.12;
+            body.rotation.z = Math.PI / 2;
+            
+            // Reset tail
+            tail.rotation.z = Math.PI / 4;
+            tail.rotation.y = 0;
+        }
+        
+        // Main animation loop
+        function animateDog() {
+            requestAnimationFrame(animateDog);
+            
+            const now = Date.now();
+            const animation = animations[currentAnimation];
+            
+            if (animation) {
+                const duration = animation.customDuration || animation.duration;
+                const elapsed = now - animationStartTime;
+                const t = (elapsed % duration) / duration;
+                
+                animation.update(t);
+            }
+        }
+        
+        // Start animation loop
         animateDog();
         
-        logger.info('Primitive dog created for fallback');
+        // Make animations accessible
+        container.animations = animations;
+        container.playAnimation = playAnimation;
+        
+        // Default to idle animation
+        playAnimation('idle');
+        
+        logger.info('Enhanced primitive dog created for fallback');
         document.getElementById('status').textContent = '3D Mode Active - Drag to rotate view';
     }
     </script>
